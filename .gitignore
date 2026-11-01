@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.log
+
+# Environment & Virtualenvs
+venv/
+env/
+ENV/
+.env
+
+# Data & Profiles (Do not upload browser sessions or temporary databases)
+data/whatsapp_profile/
+data/test_wa_profile/
+data/whatsapp_status.json
+data/whatsapp_qr.png
+logs/
+*.csv
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
