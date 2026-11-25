@@ -18,6 +18,7 @@ from ui.components import nav_logo
 from ui.views import (
     render_login_v3,
     render_dashboard,
+    render_agency_hub,
     render_search,
     render_crm,
     render_message_center,
@@ -99,6 +100,7 @@ def main():
         # Nav items
         nav_items = [
             ("📊", "لوحة التحكم",   "Dashboard"),
+            ("🎯", "شركات الإعلانات والتوظيف", "Agency Hub"),
             ("🔍", "استكشاف العملاء", "Search Leads"),
             ("👥", "إدارة العملاء",   "Leads CRM"),
             ("💬", "مركز الرسائل",    "Message Center"),
@@ -169,6 +171,7 @@ def main():
     # ── Page Routing ────────────────────────────────────────────────────────
     page = st.session_state.current_page
     if   page == "Dashboard":     render_dashboard()
+    elif page == "Agency Hub":    render_agency_hub()
     elif page == "Search Leads":  render_search()
     elif page == "Leads CRM":     render_crm()
     elif page == "Message Center": render_message_center()
