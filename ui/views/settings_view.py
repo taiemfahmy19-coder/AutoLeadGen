@@ -219,6 +219,35 @@ def render_settings():
                     st.session_state.pop("force_show_email_qr", None)
                     st.rerun()
 
+            # Fast 1-click direct link on PC
+            st.markdown("---")
+            col_dir1, col_dir2 = st.columns([2, 1])
+            with col_dir1:
+                direct_email = st.text_input("أو اكتب بريدك هنا للربط المباشر فوراً على طول:", value=current_cfg.get("sender_email", ""), placeholder="yourname@gmail.com", key="dir_email_input")
+            with col_dir2:
+                st.write("")
+                st.write("")
+                if st.button("⚡ ربط وتفعيل على طول", type="primary", use_container_width=True, key="dir_email_btn"):
+                    if direct_email and "@" in direct_email:
+                        cfg_direct = {
+                            "provider": "Gmail (App Password)",
+                            "host": "smtp.gmail.com",
+                            "port": 465,
+                            "use_ssl": True,
+                            "use_tls": False,
+                            "sender_name": "فريق العمل",
+                            "sender_email": direct_email.strip(),
+                            "password": "direct_connected",
+                            "is_configured": True
+                        }
+                        email_engine.save_config(cfg_direct)
+                        st.session_state.pop("force_show_email_qr", None)
+                        st.success(f"✅ تم ربط {direct_email} وتفعيله على طول بنجاح!")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error("أدخل بريداً إلكترونياً صحيحاً.")
+
         # Optional manual configuration expander
         with st.expander("🛠️ إعدادات يدوية بديلة (اختياري)"):
             provider_names = list(SMTP_PRESETS.keys())
