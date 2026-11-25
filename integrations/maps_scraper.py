@@ -43,6 +43,16 @@ class LeadScraper:
             warning("LeadScraper: use_live_browser=False — Google Maps requires a live browser. Returning empty.")
             return []
 
+    def scrape_leads(self, *args, **kwargs):
+        """Backward-compatible alias for search_leads."""
+        if "query" in kwargs and "industry" not in kwargs:
+            kwargs["industry"] = kwargs.pop("query")
+        if "city" not in kwargs:
+            kwargs["city"] = ""
+        if "progress_callback" in kwargs and "progress_cb" not in kwargs:
+            kwargs["progress_cb"] = kwargs.pop("progress_callback")
+        return self.search_leads(*args, **kwargs)
+
         # Google Maps live scraping — the ONLY real source
         raw_leads = []
         try:

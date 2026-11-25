@@ -103,56 +103,71 @@ def render_agency_hub():
             status_box = st.empty()
             progress_bar = st.progress(0.0)
 
+            country_dial_codes = {
+                "مصر 🇪🇬": "20",
+                "السعودية 🇸🇦": "966",
+                "الإمارات 🇦🇪": "971",
+                "الكويت 🇰🇼": "965",
+                "قطر 🇶🇦": "974",
+            }
+            dial_code = country_dial_codes.get(country_choice, "20")
             clean_country = country_choice.split()[0] if " " in country_choice else country_choice
-            query = f"{target_sector} في {city} {clean_country}"
 
-            status_box.info(f"🔍 جاري البحث المباشر عن: **{query}**...")
+            status_box.info(f"🔍 جاري البحث المباشر عن: **{target_sector}** في **{city}**...")
 
             try:
-                scraper = LeadScraper()
-                raw_results = scraper.scrape_leads(
-                    query=query,
+                scraper = getattr(st.session_state, "scraper", None) or LeadScraper()
+                existing_phones = {l[2] for l in db.get_all_leads() if l[2]}
+
+                def on_lead_progress(curr, total, name, note):
+                    if total > 0:
+                        progress_bar.progress(min(1.0, curr / total))
+                    if name:
+                        status_box.info(f"⚡ استخراج [{curr}/{total}]: **{name}**...")
+
+                raw_results = scraper.search_leads(
+                    industry=target_sector,
+                    city=city,
+                    country=clean_country,
+                    country_code=dial_code,
                     limit=limit_count,
-                    progress_callback=lambda curr, total: progress_bar.progress(min(1.0, curr / max(1, total)))
+                    use_live_browser=True,
+                    whatsapp_only=False,
+                    exclude_phones=existing_phones,
+                    progress_cb=on_lead_progress,
                 )
 
                 if not raw_results:
                     status_box.warning("⚠️ لم يتم العثور على نتائج جديدة لهذه المنطقة. جرب تغيير المدينة أو البحث عن نشاط مكمل.")
                 else:
-                    cleaner = DataCleaner()
                     added_count = 0
-
                     for item in raw_results:
-                        cleaned = cleaner.clean_lead_data(
-                            name=item.get("name", ""),
-                            phone=item.get("phone", ""),
+                        b_name = item.get("business_name") or item.get("name")
+                        phone = item.get("phone")
+                        if not b_name or not phone:
+                            continue
+
+                        fit_score = calculate_ai_fit(target_sector) + 15
+                        lat = item.get("latitude")
+                        lon = item.get("longitude")
+                        wa_st = item.get("whatsapp_status", "UNKNOWN")
+
+                        db.insert_lead(
+                            business_name=b_name,
+                            phone=phone,
                             address=item.get("address", ""),
                             website=item.get("website", ""),
                             industry=target_sector,
                             city=city,
-                            country=clean_country
+                            source="Google Maps Turbo",
+                            language="Arabic",
+                            score=fit_score,
+                            status=STATUS_READY,
+                            latitude=lat,
+                            longitude=lon,
+                            whatsapp_status=wa_st
                         )
-
-                        if cleaned and cleaned.get("phone"):
-                            fit_score = calculate_ai_fit(target_sector) + 15
-                            lat = item.get("latitude")
-                            lon = item.get("longitude")
-
-                            db.insert_lead(
-                                business_name=cleaned["business_name"],
-                                phone=cleaned["phone"],
-                                address=cleaned.get("address", ""),
-                                website=cleaned.get("website", ""),
-                                industry=target_sector,
-                                city=city,
-                                source="Google Maps Turbo",
-                                language="Arabic",
-                                score=fit_score,
-                                status=STATUS_READY,
-                                latitude=lat,
-                                longitude=lon
-                            )
-                            added_count += 1
+                        added_count += 1
 
                     progress_bar.progress(1.0)
                     status_box.success(f"🎉 تم بنجاح استخراج وإضافة **{added_count}** شركة جديدة من {target_sector} إلى قاعدة البيانات!")
