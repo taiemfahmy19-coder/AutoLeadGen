@@ -85,11 +85,8 @@ LANGUAGES = ["Arabic", "English", "Manual"]
 # Industry Presets for Search UI
 INDUSTRY_PRESETS = [
     "شركات دعاية وإعلان وتسويق",
-    "شركات تصميم ودعاية",
-    "شركات تسويق رقمي",
-    "شركات طباعة وإعلان",
-    "محلات عطور وبرفانات",
     "محلات شوكولاتة",
+    "محلات عطور وبرفانات",
     "محلات حلويات ومخابز",
     "محلات ملابس وأزياء",
     "محلات أحذية وشنط",
@@ -101,6 +98,9 @@ INDUSTRY_PRESETS = [
     "مطاعم صغيرة",
     "كافيهات ومقاهي",
     "شركات برمجة وتطوير",
+    "شركات تصميم ودعاية",
+    "شركات تسويق رقمي",
+    "شركات طباعة وإعلان",
     "شركات عقارات وتشطيبات",
     "شركات شحن وتوصيل",
     "متاجر إلكترونية",
@@ -703,6 +703,9 @@ WORLD_COUNTRIES_DATA = {
 
 # High-Fit Visual & Advertising Keywords
 HIGH_FIT_AI_INDUSTRIES = {
+    # Advertising & Marketing Agencies (10 points)
+    "دعاية": 10, "إعلان": 10, "اعلان": 10, "تسويق": 10, "تصميم": 10,
+    "advertising": 10, "agency": 10, "marketing": 10, "media": 10,
     # Visual & Product niches (10 points)
     "عطور": 10, "برفانات": 10, "perfumes": 10, "perfume": 10, "fragrance": 10,
     "شوكولاتة": 10, "chocolate": 10, "chocolates": 10,
@@ -745,6 +748,7 @@ DEFAULT_ITALIAN_TEMPLATE = """Buongiorno 👋, abbiamo notato l'eccellente attiv
 
 # Standard English translations for Arabic Industry Presets
 INDUSTRY_TRANSLATIONS = {
+    "شركات دعاية وإعلان وتسويق": "Advertising & Marketing Agency",
     "محلات عطور وبرفانات": "Perfume & Fragrance",
     "محلات شوكولاتة": "Chocolate & Confectionery",
     "محلات حلويات ومخابز": "Bakery & Pastry",

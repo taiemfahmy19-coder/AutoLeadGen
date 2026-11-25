@@ -187,7 +187,23 @@ class OutreachService:
             raw_template = name_or_template
             b_name = (biz_arg or "").strip()
         else:
-            raw_template = template if (template and template.strip()) else random.choice(DEFAULT_SPINTAX_TEMPLATES)
+            if template and template.strip():
+                raw_template = template
+            else:
+                ind_check = (ind_arg or "").lower()
+                if any(k in ind_check for k in ["دعاية", "إعلان", "اعلان", "تصميم", "تسويق", "advertising", "agency", "marketing"]):
+                    raw_template = (
+                        "مساؤكم خير يا فندم 👋 تحياتي لفريق {business} المبدع في مجال {industry}،\n\n"
+                        "أنا تيم فهمي، مصمم جرافيك وإعلانات. بقدم دعماً إبداعياً مرناً لتخفيف ضغط تسليمات الحملات بتسليم سريع وجودة ممتازة.\n\n"
+                        "وعلشان تشوفوا مستوى الشغل على أرض الواقع بنفسكم:\n"
+                        "✨ أنا جاهز أنفذ لحضراتكم أول تصميم أو ريلز لعميل عندكم 'مجاناً تماماً وبدون أي مقابل' 🤝.\n\n"
+                        "لو حابين نجرب، شرفني بالبريف وهجهزه لحضرتك في نفس اليوم:\n"
+                        "📱 واتساب / اتصال: 01147018367\n"
+                        "✉️ إيميل: taiemfahmy19@gmail.com\n\n"
+                        "مع كامل التقدير،\nتيم فهمي"
+                    )
+                else:
+                    raw_template = random.choice(DEFAULT_SPINTAX_TEMPLATES)
             b_name = (biz_arg or name_or_template or "").strip()
 
         ind = (ind_arg or "").strip()
