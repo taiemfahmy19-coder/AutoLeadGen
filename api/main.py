@@ -10,8 +10,10 @@ Or via Start_V3_API.bat
 import json
 from typing import Optional
 from datetime import datetime
+from pydantic import BaseModel
 
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
@@ -19,6 +21,7 @@ from core.security import verify_access_token, has_permission
 from core.user_manager import UserManager
 from core.task_manager import task_manager
 from integrations.multi_source_discovery import run_discovery
+from integrations.email_engine import EmailEngine, SMTP_PRESETS
 from database.repository import LeadRepository
 from api.schemas import (
     LoginResponse, LeadsPage, LeadDetail, TaskOut,
@@ -244,6 +247,163 @@ def cancel_task(task_id: str, _user=Depends(require_permission("tasks:manage")))
     if not ok:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"ok": True}
+
+
+# ── QR Email Linking ─────────────────────────────────────────────────────────
+
+@app.get("/connect-email", response_class=HTMLResponse, tags=["email"])
+def connect_email_page():
+    return """<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ربط البريد الإلكتروني — AutoLeadGen V3</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #070b14; color: #f1f5f9; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .card { background: #0f172a; border: 1px solid rgba(99,102,241,0.3); border-radius: 18px; padding: 26px 20px; max-width: 420px; width: 100%; box-shadow: 0 16px 40px rgba(0,0,0,0.6); }
+    .icon { width: 56px; height: 56px; background: linear-gradient(135deg, #6366f1, #a855f7); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 16px; }
+    h2 { text-align: center; font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+    p.sub { text-align: center; font-size: 13px; color: #94a3b8; margin-bottom: 22px; }
+    .field { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #cbd5e1; margin-bottom: 6px; }
+    input, select { width: 100%; padding: 12px 14px; background: #1e293b; border: 1px solid #334155; border-radius: 10px; color: #fff; font-size: 14px; outline: none; }
+    input:focus, select:focus { border-color: #6366f1; }
+    .hint { font-size: 11px; color: #818cf8; margin-top: 4px; line-height: 1.4; }
+    button { width: 100%; padding: 14px; background: #6366f1; color: #fff; border: none; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 10px; }
+    button:disabled { opacity: 0.6; }
+    #msg { margin-top: 14px; padding: 12px; border-radius: 10px; font-size: 13px; text-align: center; display: none; }
+    .success { background: rgba(16,185,129,0.2); color: #10b981; border: 1px solid #10b981; }
+    .error { background: rgba(239,68,68,0.2); color: #ef4444; border: 1px solid #ef4444; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✉️</div>
+    <h2>ربط البريد الإلكتروني السريع</h2>
+    <p class="sub">تم المسح عبر الهاتف بنجاح! أدخل بيانات بريدك ليتم ربطه بالكمبيوتر تلقائياً.</p>
+    <form id="emailForm">
+      <div class="field">
+        <label>نوع البريد:</label>
+        <select id="provider">
+          <option value="Gmail (App Password)">Gmail (حساب جوجل)</option>
+          <option value="Outlook / Office 365">Outlook / Hotmail / Office 365</option>
+          <option value="Yahoo Mail">Yahoo Mail</option>
+          <option value="Custom SMTP / Webmail">بريد شركة خاص (Webmail)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>اسمك / اسم شركتك الظاهر للعميل:</label>
+        <input type="text" id="sender_name" value="فريق العمل" required>
+      </div>
+      <div class="field">
+        <label>عنوان البريد الإلكتروني:</label>
+        <input type="email" id="sender_email" placeholder="example@gmail.com" required>
+      </div>
+      <div class="field">
+        <label>كلمة مرور التطبيقات (App Password):</label>
+        <input type="password" id="password" placeholder="••••••••••••••••" required>
+        <div class="hint">💡 لحسابات Gmail: استخدم كلمة مرور التطبيقات المكونة من 16 حرفاً (من إعدادات حساب Google ← الأمان ← التحقق بخطوتين).</div>
+      </div>
+      <button type="submit" id="btnSubmit">ربط الحساب بالكمبيوتر فوراً ⚡</button>
+    </form>
+    <div id="msg"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('emailForm');
+    const msg = document.getElementById('msg');
+    const btn = document.getElementById('btnSubmit');
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      btn.disabled = true;
+      btn.innerText = "جاري التحقق من البريد والربط...";
+      msg.style.display = "none";
+
+      try {
+        const res = await fetch('/api/email/qr-connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: document.getElementById('provider').value,
+            sender_name: document.getElementById('sender_name').value,
+            sender_email: document.getElementById('sender_email').value,
+            password: document.getElementById('password').value
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          msg.className = "success";
+          msg.innerHTML = "✅ تم ربط البريد الإلكتروني بنجاح تام! يمكنك الآن العودة لشاشة الكمبيوتر.";
+          msg.style.display = "block";
+          btn.innerText = "تم الربط بنجاح ✅";
+        } else {
+          msg.className = "error";
+          msg.innerHTML = "❌ " + (data.detail || data.message || "تعذر الاتصال بالبريد.");
+          msg.style.display = "block";
+          btn.disabled = false;
+          btn.innerText = "إعادة المحاولة";
+        }
+      } catch (err) {
+        msg.className = "error";
+        msg.innerHTML = "❌ حدث خطأ في الاتصال بالخادم.";
+        msg.style.display = "block";
+        btn.disabled = false;
+        btn.innerText = "إعادة المحاولة";
+      }
+    };
+  </script>
+</body>
+</html>"""
+
+
+class QRConnectEmailRequest(BaseModel):
+    provider: str = "Gmail (App Password)"
+    sender_name: str = "فريق العمل"
+    sender_email: str
+    password: str
+
+
+@app.post("/api/email/qr-connect", tags=["email"])
+def qr_connect_email(body: QRConnectEmailRequest):
+    engine = EmailEngine()
+    preset = SMTP_PRESETS.get(body.provider, SMTP_PRESETS["Gmail (App Password)"])
+    cfg = {
+        "provider": body.provider,
+        "host": preset["host"],
+        "port": preset["port"],
+        "use_ssl": preset["use_ssl"],
+        "use_tls": preset["use_tls"],
+        "sender_name": body.sender_name.strip(),
+        "sender_email": body.sender_email.strip(),
+        "password": body.password.strip(),
+    }
+    # Test connection
+    ok, test_msg = engine.test_connection(cfg)
+    if not ok:
+        raise HTTPException(status_code=400, detail=test_msg)
+
+    # Save encrypted
+    saved = engine.save_config(cfg)
+    if not saved:
+        raise HTTPException(status_code=500, detail="Failed to save encrypted config.")
+
+    # Broadcast event
+    ws_manager.broadcast_sync("email_connected", {"sender_email": body.sender_email, "provider": body.provider})
+
+    repo = LeadRepository()
+    try:
+        repo.create_notification(
+            ntype="email_linked",
+            title="✅ تم ربط البريد الإلكتروني بنجاح",
+            body=f"تم ربط {body.sender_email} بنجاح عبر مسح رمز الـ QR من الهاتف.",
+        )
+    finally:
+        repo.close()
+
+    return {"ok": True, "message": test_msg}
 
 
 # ── Email inbox ──────────────────────────────────────────────────────────────

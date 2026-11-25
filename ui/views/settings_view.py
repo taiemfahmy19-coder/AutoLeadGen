@@ -142,108 +142,117 @@ def render_settings():
                 st.caption(f"⏱️ العملية نشطة — المهلة المتبقية: {remaining} ثانية")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 2. EMAIL SMTP SETTINGS
+    # 2. EMAIL CONNECTION VIA QR CODE
     # ══════════════════════════════════════════════════════════════════════════
+    import socket
+    import io
+    import qrcode
     from integrations.email_engine import EmailEngine, SMTP_PRESETS
     email_engine = EmailEngine()
     current_cfg = email_engine.load_config()
+    is_email_configured = current_cfg.get("is_configured", False)
 
     with st.container(border=True):
-        section_label("✉️ إعدادات البريد الإلكتروني (Cold Email SMTP)")
-        st.markdown(
-            "<p style=\'font-size:13px;color:#888;margin-bottom:12px\'>"
-            "إرسال إيميلات تسويقية مجاناً 100% عبر SMTP المباشر (Gmail App Password، Outlook، بريد شركتك). "
-            "البيانات محفوظة محلياً على جهازك فقط — لا يتم إرسالها لأي خادم."
-            "</p>",
-            unsafe_allow_html=True
-        )
+        section_label("✉️ ربط البريد الإلكتروني عبر كود QR")
 
-        # Status pill
-        is_email_configured = current_cfg.get("is_configured", False)
-        email_status_color = "#30d158" if is_email_configured else "#636366"
-        email_status_txt = f"✅ مُفعَّل ({current_cfg.get('sender_email','')})" if is_email_configured else "⚫ غير مُفعَّل"
-        st.markdown(
-            f"<div style=\'display:inline-block;background:{email_status_color}22;"
-            f"border:1px solid {email_status_color}55;border-radius:99px;"
-            f"padding:4px 14px;font-size:13px;font-weight:600;color:{email_status_color};"
-            f"margin-bottom:12px\'>{email_status_txt}</div>",
-            unsafe_allow_html=True
-        )
+        # Get machine local IP
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('8.8.8.8', 80))
+            lan_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            lan_ip = "127.0.0.1"
 
-        provider_names = list(SMTP_PRESETS.keys())
-        curr_provider = current_cfg.get("provider", provider_names[0])
-        default_idx = provider_names.index(curr_provider) if curr_provider in provider_names else 0
+        qr_target_url = f"http://{lan_ip}:8502/connect-email"
 
-        p_col1, p_col2 = st.columns(2)
-        with p_col1:
-            selected_provider = st.selectbox("مزود الخدمة:", provider_names, index=default_idx, key="em_provider")
-            preset = SMTP_PRESETS[selected_provider]
-            st.caption(f"💡 {preset['note']}")
-        with p_col2:
-            sender_name = st.text_input("اسم المرسل الظاهر للعميل:",
-                                        value=current_cfg.get("sender_name", "فريق العمل"))
-
-        f_col1, f_col2 = st.columns(2)
-        with f_col1:
-            sender_email = st.text_input("بريدك الإلكتروني:",
-                                         value=current_cfg.get("sender_email", ""),
-                                         placeholder="example@gmail.com")
-        with f_col2:
-            password = st.text_input(
-                "كلمة مرور التطبيقات (App Password):",
-                value=current_cfg.get("password", ""),
-                type="password",
-                help="Gmail: Google Account → Security → 2-Step Verification → App Passwords → نشئ كلمة مرور جديدة (16 حرف)"
+        if is_email_configured:
+            st.markdown(
+                f"""
+                <div style="background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.3);border-radius:12px;padding:14px 18px;margin-bottom:14px">
+                    <div style="color:#30d158;font-weight:700;font-size:16px">✅ البريد الإلكتروني مرتبط وجاهز للإرسال والاستقبال</div>
+                    <div style="color:#cbd5e1;font-size:13px;margin-top:4px">الحساب المرتبط: <strong>{current_cfg.get('sender_email')}</strong> ({current_cfg.get('provider')})</div>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
-
-        show_advanced = (selected_provider == "Custom SMTP / Webmail")
-        with st.expander("⚙️ إعدادات الخادم المتقدمة", expanded=show_advanced):
-            h_col1, h_col2, h_col3 = st.columns([2, 1, 1])
-            with h_col1:
-                host_val = st.text_input("خادم SMTP:", value=current_cfg.get("host", preset["host"]))
-            with h_col2:
-                port_val = st.number_input("المنفذ:", min_value=1, max_value=65535,
-                                           value=int(current_cfg.get("port", preset["port"])))
-            with h_col3:
-                ssl_option = st.selectbox("التشفير:",
-                                          ["SSL (Port 465)", "STARTTLS (Port 587)", "None"],
-                                          index=0 if preset["use_ssl"] else 1)
-
-        cfg_to_save = {
-            "provider": selected_provider,
-            "host": host_val if selected_provider == "Custom SMTP / Webmail" else preset["host"],
-            "port": port_val if selected_provider == "Custom SMTP / Webmail" else preset["port"],
-            "use_ssl": (ssl_option == "SSL (Port 465)") if selected_provider == "Custom SMTP / Webmail" else preset["use_ssl"],
-            "use_tls": (ssl_option == "STARTTLS (Port 587)") if selected_provider == "Custom SMTP / Webmail" else preset["use_tls"],
-            "sender_name": sender_name.strip(),
-            "sender_email": sender_email.strip(),
-            "password": password.strip(),
-        }
-
-        em_b1, em_b2 = st.columns(2)
-        with em_b1:
-            if st.button("💾 حفظ إعدادات البريد", type="primary", use_container_width=True, key="em_save"):
-                if not sender_email.strip() or "@" not in sender_email:
-                    st.error("يرجى إدخال بريد إلكتروني صحيح.")
-                elif not password.strip():
-                    st.error("يرجى إدخال App Password.")
-                elif email_engine.save_config(cfg_to_save):
-                    st.success("✅ تم حفظ إعدادات البريد بنجاح!")
-                    time.sleep(0.4)
-                    st.rerun()
-                else:
-                    st.error("❌ تعذر الحفظ.")
-        with em_b2:
-            if st.button("⚡ اختبار الاتصال الآن", use_container_width=True, key="em_test"):
-                if not sender_email.strip() or not password.strip():
-                    st.error("أدخل البريد وكلمة المرور أولاً.")
-                else:
-                    with st.spinner("جاري الاتصال بخادم البريد..."):
-                        test_ok, test_msg = email_engine.test_connection(cfg_to_save)
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                if st.button("⚡ فحص صلاحية الاتصال الآن", use_container_width=True, key="em_test_btn"):
+                    with st.spinner("جاري فحص الاتصال..."):
+                        test_ok, test_msg = email_engine.test_connection(current_cfg)
                     if test_ok:
                         st.success(test_msg)
                     else:
                         st.error(test_msg)
+            with col_t2:
+                if st.button("🔄 إعادة الربط أو مسح كود جديد", use_container_width=True, key="em_reconnect_btn"):
+                    st.session_state["force_show_email_qr"] = True
+                    st.rerun()
+
+        # Display QR Code when not configured or reconnecting
+        if not is_email_configured or st.session_state.get("force_show_email_qr", False):
+            st.markdown(
+                """
+                <div style="background:#111928;border:1px dashed #6366f1;border-radius:14px;padding:16px;text-align:center;margin-bottom:14px">
+                    <p style="font-size:16px;font-weight:700;color:#e0e7ff;margin-bottom:4px">📱 امسح الـ QR Code بهاتفك لربط الإيميل فوراً</p>
+                    <p style="font-size:12px;color:#94a3b8">افتح كاميرا الهاتف واقترب من الرمز أدناه، ثم ادخل بريدك واضغط ربط ليتصل بالكمبيوتر تلقائياً.</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            # Generate QR Code image
+            qr = qrcode.QRCode(version=1, box_size=6, border=2)
+            qr.add_data(qr_target_url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="#070b14", back_color="#ffffff")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            qr_bytes = buf.getvalue()
+
+            col_ql, col_qc, col_qr = st.columns([1, 1.2, 1])
+            with col_qc:
+                st.image(qr_bytes, width=250, caption="رمز QR لربط البريد الإلكتروني")
+                st.caption(f"الرابط المباشر: {qr_target_url}")
+                if st.button("🔄 تحديث بعد المسح", use_container_width=True, key="em_refresh_btn", type="primary"):
+                    st.session_state.pop("force_show_email_qr", None)
+                    st.rerun()
+
+        # Optional manual configuration expander
+        with st.expander("🛠️ إعدادات يدوية بديلة (اختياري)"):
+            provider_names = list(SMTP_PRESETS.keys())
+            curr_provider = current_cfg.get("provider", provider_names[0])
+            default_idx = provider_names.index(curr_provider) if curr_provider in provider_names else 0
+
+            p_col1, p_col2 = st.columns(2)
+            with p_col1:
+                selected_provider = st.selectbox("مزود الخدمة:", provider_names, index=default_idx, key="em_provider")
+                preset = SMTP_PRESETS[selected_provider]
+            with p_col2:
+                sender_name = st.text_input("اسم المرسل الظاهر للعميل:", value=current_cfg.get("sender_name", "فريق العمل"))
+
+            f_col1, f_col2 = st.columns(2)
+            with f_col1:
+                sender_email = st.text_input("بريدك الإلكتروني:", value=current_cfg.get("sender_email", ""), placeholder="example@gmail.com")
+            with f_col2:
+                password = st.text_input("كلمة مرور التطبيقات (App Password):", value=current_cfg.get("password", ""), type="password")
+
+            if st.button("💾 حفظ الإعدادات اليدوية", key="em_save_manual"):
+                cfg_to_save = {
+                    "provider": selected_provider,
+                    "host": preset["host"],
+                    "port": preset["port"],
+                    "use_ssl": preset["use_ssl"],
+                    "use_tls": preset["use_tls"],
+                    "sender_name": sender_name.strip(),
+                    "sender_email": sender_email.strip(),
+                    "password": password.strip(),
+                }
+                if email_engine.save_config(cfg_to_save):
+                    st.success("✅ تم الحفظ بنجاح!")
+                    st.session_state.pop("force_show_email_qr", None)
+                    st.rerun()
 
         with st.expander("📖 كيفية إنشاء App Password لـ Gmail"):
             st.markdown("""
