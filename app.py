@@ -16,6 +16,7 @@ from integrations.maps_scraper import LeadScraper
 from ui.theme import apply_theme
 from ui.components import nav_logo
 from ui.views import (
+    render_login_v3,
     render_dashboard,
     render_search,
     render_crm,
@@ -63,6 +64,10 @@ if "current_page" not in st.session_state: st.session_state.current_page = "Dash
 
 
 def main():
+    if not st.session_state.get("v3_user"):
+        render_login_v3()
+        return
+
     wa_status    = st.session_state.messenger.get_connection_status()
     is_connected = (wa_status == "CONNECTED")
 
@@ -157,6 +162,8 @@ def main():
             if st.button("🚪", use_container_width=True, help="خروج"):
                 st.session_state.messenger.disconnect()
                 st.session_state.authenticated = False
+                st.session_state.pop("v3_user", None)
+                st.session_state.pop("v3_role", None)
                 st.rerun()
 
     # ── Page Routing ────────────────────────────────────────────────────────

@@ -16,6 +16,12 @@ data/whatsapp_profile/
 data/test_wa_profile/
 data/whatsapp_status.json
 data/whatsapp_qr.png
+data/.master.key
+data/.jwt_secret
+data/backups/
+data/*.db
+data/*.db-wal
+data/*.db-shm
 logs/
 *.csv
 

@@ -98,11 +98,15 @@ class EmailEngine:
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
 
     def load_config(self) -> dict:
-        """Load saved SMTP configuration."""
+        """Load saved SMTP configuration (decrypting stored password transparently)."""
+        from core.security import decrypt_secret
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    cfg = json.load(f)
+                    if cfg.get("password"):
+                        cfg["password"] = decrypt_secret(cfg["password"])
+                    return cfg
             except Exception as e:
                 warning(f"Failed to read email config: {e}")
         return {
@@ -118,11 +122,15 @@ class EmailEngine:
         }
 
     def save_config(self, cfg: dict) -> bool:
-        """Save SMTP configuration locally."""
+        """Save SMTP configuration locally with Fernet-encrypted password."""
+        from core.security import encrypt_secret
         try:
-            cfg["is_configured"] = bool(cfg.get("sender_email") and cfg.get("password") and cfg.get("host"))
+            to_save = dict(cfg)
+            to_save["is_configured"] = bool(to_save.get("sender_email") and to_save.get("password") and to_save.get("host"))
+            if to_save.get("password"):
+                to_save["password"] = encrypt_secret(to_save["password"])
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
+                json.dump(to_save, f, ensure_ascii=False, indent=2)
             info("Email configuration saved successfully.")
             return True
         except Exception as e:

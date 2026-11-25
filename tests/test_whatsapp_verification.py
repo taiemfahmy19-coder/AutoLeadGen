@@ -43,15 +43,12 @@ class TestWhatsAppVerification(unittest.TestCase):
     def test_random_numbers_never_marked_as_verified(self):
         """
         CORE TRUTH TEST:
-        Discovery scraper MUST NEVER set whatsapp_status = 'VERIFIED'
-        for untested numbers!
+        Discovery scraper MUST NEVER invent synthetic numbers or mark untested numbers as VERIFIED.
+        With use_live_browser=False, it strictly returns an empty list [].
         """
         scraper = LeadScraper()
         leads = scraper.search_leads("عطور", "القاهرة", limit=5, use_live_browser=False, messenger=None)
-        self.assertTrue(len(leads) > 0)
-        for lead in leads:
-            # Must be UNKNOWN until verified via real network/session check
-            self.assertEqual(lead["whatsapp_status"], WA_STATUS_UNKNOWN)
+        self.assertEqual(leads, [])
 
     def test_can_contact_blocks_do_not_contact(self):
         lid = self.db.insert_lead("Blocked Shop", "+201011112222", "Cairo", "", "عطور", "Cairo")

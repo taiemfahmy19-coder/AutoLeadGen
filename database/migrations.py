@@ -116,6 +116,130 @@ def run_migrations(db_path=DB_PATH) -> dict:
         conn.close()
 
 
+V3_LEAD_COLUMNS = [
+    ("latitude", "REAL DEFAULT NULL"),
+    ("longitude", "REAL DEFAULT NULL"),
+    ("coord_source", "TEXT DEFAULT ''"),
+    ("coord_verified", "INTEGER DEFAULT 0"),
+    ("country", "TEXT DEFAULT ''"),
+    ("continent", "TEXT DEFAULT ''"),
+    ("collected_at", "TEXT DEFAULT ''"),
+    ("source_url", "TEXT DEFAULT ''"),
+    ("ai_summary", "TEXT DEFAULT ''"),
+    ("ai_category", "TEXT DEFAULT ''"),
+    ("unsubscribed", "INTEGER DEFAULT 0"),
+    ("last_reply_at", "TEXT DEFAULT ''"),
+    ("reply_sentiment", "TEXT DEFAULT ''"),
+    ("data_confidence", "TEXT DEFAULT 'unknown'"),
+]
+
+
+def run_v3_migrations(db_path=DB_PATH) -> dict:
+    """Apply AutoLeadGen V3 schema extensions idempotently without touching existing data."""
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=15.0)
+    added_cols = []
+    try:
+        with conn:
+            conn.execute("PRAGMA journal_mode = WAL;")
+            conn.execute("PRAGMA foreign_keys = ON;")
+
+            # Ensure leads table has V3 columns if it already exists
+            cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='leads'")
+            if cur.fetchone():
+                for col, col_def in V3_LEAD_COLUMNS:
+                    try:
+                        conn.execute(f"ALTER TABLE leads ADD COLUMN {col} {col_def};")
+                        added_cols.append(col)
+                    except sqlite3.OperationalError:
+                        pass
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_coords ON leads(latitude, longitude);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_country ON leads(country);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_industry ON leads(industry);")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT DEFAULT '',
+                    password_hash TEXT NOT NULL,
+                    role TEXT DEFAULT 'operator',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    is_active INTEGER DEFAULT 1,
+                    last_login TEXT DEFAULT ''
+                );
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY,
+                    task_type TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    progress REAL DEFAULT 0.0,
+                    started_at TEXT DEFAULT '',
+                    finished_at TEXT DEFAULT '',
+                    error_log TEXT DEFAULT '',
+                    params_json TEXT DEFAULT '{}',
+                    result_json TEXT DEFAULT '{}',
+                    cancel_requested INTEGER DEFAULT 0
+                );
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_checkpoints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    search_key TEXT UNIQUE NOT NULL,
+                    source TEXT NOT NULL,
+                    last_offset INTEGER DEFAULT 0,
+                    total_found INTEGER DEFAULT 0,
+                    resumed_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS email_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lead_id INTEGER,
+                    direction TEXT NOT NULL,
+                    subject TEXT DEFAULT '',
+                    body_html TEXT DEFAULT '',
+                    body_text TEXT DEFAULT '',
+                    from_addr TEXT DEFAULT '',
+                    to_addr TEXT DEFAULT '',
+                    message_id_header TEXT DEFAULT '',
+                    in_reply_to TEXT DEFAULT '',
+                    sent_at TEXT DEFAULT '',
+                    received_at TEXT DEFAULT '',
+                    sentiment TEXT DEFAULT 'unknown',
+                    thread_id TEXT DEFAULT '',
+                    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_email_lead_id ON email_messages(lead_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_email_msg_id ON email_messages(message_id_header);")
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT DEFAULT '',
+                    is_read INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    lead_id INTEGER DEFAULT NULL
+                );
+            """)
+        info(f"V3 migrations applied cleanly. Added columns: {added_cols}")
+        return {"status": "success", "added_columns": added_cols}
+    except Exception as e:
+        error(f"V3 migration failed: {e}")
+        return {"status": "error", "error": str(e)}
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     result = run_migrations()
-    print("Migration Result:", result)
+    print("V2 Migration Result:", result)
+    v3_res = run_v3_migrations()
+    print("V3 Migration Result:", v3_res)

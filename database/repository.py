@@ -22,6 +22,7 @@ from config.constants import (
     DEFAULT_ENGLISH_TEMPLATE,
 )
 from database.connection import DatabaseManager
+from database.base import AbstractLeadRepository
 from utils.logger import info, audit, error
 
 
@@ -29,11 +30,15 @@ from utils.logger import info, audit, error
 ALLOWED_UPDATE_COLUMNS = {
     "business_name", "phone", "address", "website", "industry", "city",
     "source", "score", "status", "language", "whatsapp_status", "phone_validity",
-    "email", "email_status", "instagram_handle", "facebook_url"
+    "email", "email_status", "instagram_handle", "facebook_url",
+    "latitude", "longitude", "coord_source", "coord_verified",
+    "country", "continent", "collected_at", "source_url",
+    "ai_summary", "ai_category", "unsubscribed", "last_reply_at",
+    "reply_sentiment", "data_confidence",
 }
 
 
-class LeadRepository:
+class LeadRepository(AbstractLeadRepository):
     def __init__(self, db_path=None):
         self.db_path = db_path or DB_PATH
         self.db_mgr = DatabaseManager(self.db_path)
@@ -69,17 +74,32 @@ class LeadRepository:
                 );
             """)
 
-            # Migration: ensure omnichannel columns exist in existing databases
+            # Migration: ensure omnichannel & V3 columns exist in existing databases
             for col, dflt in [
                 ("whatsapp_status", "UNKNOWN"),
                 ("phone_validity", "UNKNOWN"),
                 ("email", "''"),
                 ("email_status", "'UNKNOWN'"),
                 ("instagram_handle", "''"),
-                ("facebook_url", "''")
+                ("facebook_url", "''"),
+                ("latitude", "NULL"),
+                ("longitude", "NULL"),
+                ("coord_source", "''"),
+                ("coord_verified", "0"),
+                ("country", "''"),
+                ("continent", "''"),
+                ("collected_at", "''"),
+                ("source_url", "''"),
+                ("ai_summary", "''"),
+                ("ai_category", "''"),
+                ("unsubscribed", "0"),
+                ("last_reply_at", "''"),
+                ("reply_sentiment", "''"),
+                ("data_confidence", "'unknown'"),
             ]:
                 try:
-                    conn.execute(f"ALTER TABLE leads ADD COLUMN {col} TEXT DEFAULT {dflt};")
+                    col_type = "REAL" if col in ("latitude", "longitude") else ("INTEGER" if col in ("coord_verified", "unsubscribed") else "TEXT")
+                    conn.execute(f"ALTER TABLE leads ADD COLUMN {col} {col_type} DEFAULT {dflt};")
                 except sqlite3.OperationalError:
                     pass
 
@@ -169,8 +189,81 @@ class LeadRepository:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(score);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_wa ON leads(whatsapp_status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_coords ON leads(latitude, longitude);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_country ON leads(country);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_industry ON leads(industry);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_interactions_lead_id ON interactions(lead_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_contacts_lead_id ON contacts(lead_id);")
+
+            # V3 Tables
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT DEFAULT '',
+                    password_hash TEXT NOT NULL,
+                    role TEXT DEFAULT 'operator',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    is_active INTEGER DEFAULT 1,
+                    last_login TEXT DEFAULT ''
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY,
+                    task_type TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    progress REAL DEFAULT 0.0,
+                    started_at TEXT DEFAULT '',
+                    finished_at TEXT DEFAULT '',
+                    error_log TEXT DEFAULT '',
+                    params_json TEXT DEFAULT '{}',
+                    result_json TEXT DEFAULT '{}',
+                    cancel_requested INTEGER DEFAULT 0
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_checkpoints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    search_key TEXT UNIQUE NOT NULL,
+                    source TEXT NOT NULL,
+                    last_offset INTEGER DEFAULT 0,
+                    total_found INTEGER DEFAULT 0,
+                    resumed_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS email_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lead_id INTEGER,
+                    direction TEXT NOT NULL,
+                    subject TEXT DEFAULT '',
+                    body_html TEXT DEFAULT '',
+                    body_text TEXT DEFAULT '',
+                    from_addr TEXT DEFAULT '',
+                    to_addr TEXT DEFAULT '',
+                    message_id_header TEXT DEFAULT '',
+                    in_reply_to TEXT DEFAULT '',
+                    sent_at TEXT DEFAULT '',
+                    received_at TEXT DEFAULT '',
+                    sentiment TEXT DEFAULT 'unknown',
+                    thread_id TEXT DEFAULT '',
+                    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_email_lead_id ON email_messages(lead_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_email_msg_id ON email_messages(message_id_header);")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT DEFAULT '',
+                    is_read INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    lead_id INTEGER DEFAULT NULL
+                );
+            """)
 
     def _seed_defaults(self):
         with self.db_mgr.transaction() as conn:
@@ -588,6 +681,250 @@ class LeadRepository:
         scores = [l[8] for l in leads if l[8] is not None]
         counts["avg_score"] = round(sum(scores) / len(scores), 1) if scores else 0
         return counts
+
+    # ── V3 Paginated, Geospatial & Platform Methods ───────────────────────────
+
+    def _lead_row_to_dict(self, cursor, row) -> dict:
+        if row is None:
+            return {}
+        cols = [d[0] for d in cursor.description]
+        return dict(zip(cols, row))
+
+    def get_leads_paginated(self, page: int = 1, page_size: int = 50, filters: dict = None):
+        page = max(1, int(page))
+        page_size = max(1, min(500, int(page_size)))
+        offset = (page - 1) * page_size
+        where_clauses, params = [], []
+        if filters:
+            if filters.get("status"):
+                where_clauses.append("status = ?")
+                params.append(filters["status"])
+            if filters.get("country"):
+                where_clauses.append("lower(country) = lower(?)")
+                params.append(filters["country"])
+            if filters.get("city"):
+                where_clauses.append("lower(city) LIKE ?")
+                params.append(f"%{filters['city'].lower()}%")
+            if filters.get("industry"):
+                where_clauses.append("lower(industry) LIKE ?")
+                params.append(f"%{filters['industry'].lower()}%")
+            if filters.get("min_score") is not None:
+                where_clauses.append("score >= ?")
+                params.append(int(filters["min_score"]))
+            if filters.get("search"):
+                q = f"%{filters['search'].lower()}%"
+                where_clauses.append("(lower(business_name) LIKE ? OR lower(email) LIKE ? OR phone LIKE ? OR lower(city) LIKE ?)")
+                params.extend([q, q, q, q])
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        cursor = self.conn.cursor()
+        cursor.execute(f"SELECT COUNT(*) FROM leads{where_sql}", tuple(params))
+        total = cursor.fetchone()[0]
+        cursor.execute(
+            f"SELECT * FROM leads{where_sql} ORDER BY score DESC, id DESC LIMIT ? OFFSET ?",
+            tuple(params + [page_size, offset]),
+        )
+        rows = [self._lead_row_to_dict(cursor, r) for r in cursor.fetchall()]
+        return rows, total
+
+    def get_leads_in_bbox(
+        self,
+        min_lat: float,
+        max_lat: float,
+        min_lon: float,
+        max_lon: float,
+        limit: int = 5000,
+        filters: dict = None,
+    ) -> list:
+        where_clauses = [
+            "latitude IS NOT NULL",
+            "longitude IS NOT NULL",
+            "latitude BETWEEN ? AND ?",
+            "longitude BETWEEN ? AND ?",
+        ]
+        params = [float(min_lat), float(max_lat), float(min_lon), float(max_lon)]
+        if filters:
+            if filters.get("country"):
+                where_clauses.append("lower(country) = lower(?)")
+                params.append(filters["country"])
+            if filters.get("industry"):
+                where_clauses.append("lower(industry) LIKE ?")
+                params.append(f"%{filters['industry'].lower()}%")
+            if filters.get("min_score") is not None:
+                where_clauses.append("score >= ?")
+                params.append(int(filters["min_score"]))
+        sql = f"SELECT * FROM leads WHERE {' AND '.join(where_clauses)} ORDER BY score DESC LIMIT ?"
+        params.append(int(limit))
+        cursor = self.conn.cursor()
+        cursor.execute(sql, tuple(params))
+        return [self._lead_row_to_dict(cursor, r) for r in cursor.fetchall()]
+
+    # Users
+    def create_user(self, username: str, email: str, password_hash: str, role: str = "operator") -> int:
+        with self.db_mgr.transaction() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
+                (username.strip(), email.strip(), password_hash, role),
+            )
+            return cur.lastrowid
+
+    def get_user_by_username(self, username: str):
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM users WHERE username = ? LIMIT 1", (username.strip(),))
+        row = cur.fetchone()
+        return self._lead_row_to_dict(cur, row) if row else None
+
+    def get_user_by_id(self, user_id: int):
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
+        row = cur.fetchone()
+        return self._lead_row_to_dict(cur, row) if row else None
+
+    def count_users(self) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM users")
+        return cur.fetchone()[0]
+
+    def list_users(self) -> list:
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, username, email, role, created_at, is_active, last_login FROM users ORDER BY id ASC")
+        return [self._lead_row_to_dict(cur, r) for r in cur.fetchall()]
+
+    def update_user_last_login(self, user_id: int):
+        with self.db_mgr.transaction() as conn:
+            conn.execute(
+                "UPDATE users SET last_login = datetime('now', 'localtime') WHERE id = ?",
+                (user_id,),
+            )
+
+    # Tasks
+    def create_task(self, task_id: str, task_type: str, params_json: str = "{}"):
+        with self.db_mgr.transaction() as conn:
+            conn.execute(
+                "INSERT INTO tasks (id, task_type, status, progress, started_at, params_json) VALUES (?, ?, 'running', 0.0, datetime('now', 'localtime'), ?)",
+                (task_id, task_type, params_json),
+            )
+
+    def update_task_progress(self, task_id: str, progress: float, status: str, error_log: str = "", result_json: str = None):
+        with self.db_mgr.transaction() as conn:
+            if status in ("completed", "failed", "cancelled"):
+                if result_json is not None:
+                    conn.execute(
+                        "UPDATE tasks SET progress = ?, status = ?, error_log = ?, result_json = ?, finished_at = datetime('now', 'localtime') WHERE id = ?",
+                        (progress, status, error_log, result_json, task_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE tasks SET progress = ?, status = ?, error_log = ?, finished_at = datetime('now', 'localtime') WHERE id = ?",
+                        (progress, status, error_log, task_id),
+                    )
+            else:
+                conn.execute(
+                    "UPDATE tasks SET progress = ?, status = ?, error_log = ? WHERE id = ?",
+                    (progress, status, error_log, task_id),
+                )
+
+    def get_task_by_id(self, task_id: str):
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM tasks WHERE id = ? LIMIT 1", (task_id,))
+        row = cur.fetchone()
+        return self._lead_row_to_dict(cur, row) if row else None
+
+    def list_tasks(self, limit: int = 50) -> list:
+        cur = self.conn.cursor()
+        cur.execute("SELECT * FROM tasks ORDER BY started_at DESC LIMIT ?", (limit,))
+        return [self._lead_row_to_dict(cur, r) for r in cur.fetchall()]
+
+    def cancel_task(self, task_id: str):
+        with self.db_mgr.transaction() as conn:
+            conn.execute("UPDATE tasks SET cancel_requested = 1 WHERE id = ?", (task_id,))
+
+    def is_task_cancelled(self, task_id: str) -> bool:
+        cur = self.conn.cursor()
+        cur.execute("SELECT cancel_requested FROM tasks WHERE id = ? LIMIT 1", (task_id,))
+        row = cur.fetchone()
+        return bool(row and row[0] == 1)
+
+    # Discovery checkpoints
+    def save_checkpoint(self, search_key: str, source: str, last_offset: int, total_found: int):
+        with self.db_mgr.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO discovery_checkpoints (search_key, source, last_offset, total_found, resumed_at)
+                VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+                ON CONFLICT(search_key) DO UPDATE SET
+                    last_offset = excluded.last_offset,
+                    total_found = excluded.total_found,
+                    resumed_at = datetime('now', 'localtime')
+                """,
+                (search_key, source, last_offset, total_found),
+            )
+
+    def load_checkpoint(self, search_key: str) -> int:
+        cur = self.conn.cursor()
+        cur.execute("SELECT last_offset FROM discovery_checkpoints WHERE search_key = ? LIMIT 1", (search_key,))
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    # Email messages & notifications
+    def insert_email_message(
+        self,
+        lead_id: int,
+        direction: str,
+        subject: str = "",
+        body_html: str = "",
+        body_text: str = "",
+        from_addr: str = "",
+        to_addr: str = "",
+        message_id_header: str = "",
+        in_reply_to: str = "",
+        sent_at: str = "",
+        received_at: str = "",
+        sentiment: str = "unknown",
+        thread_id: str = "",
+    ) -> int:
+        with self.db_mgr.transaction() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO email_messages
+                (lead_id, direction, subject, body_html, body_text, from_addr, to_addr,
+                 message_id_header, in_reply_to, sent_at, received_at, sentiment, thread_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (lead_id, direction, subject, body_html, body_text, from_addr, to_addr,
+                 message_id_header, in_reply_to, sent_at, received_at, sentiment, thread_id),
+            )
+            return cur.lastrowid
+
+    def get_email_messages(self, lead_id: int = None, limit: int = 100) -> list:
+        cur = self.conn.cursor()
+        if lead_id is not None:
+            cur.execute("SELECT * FROM email_messages WHERE lead_id = ? ORDER BY id DESC LIMIT ?", (lead_id, limit))
+        else:
+            cur.execute("SELECT * FROM email_messages ORDER BY id DESC LIMIT ?", (limit,))
+        return [self._lead_row_to_dict(cur, r) for r in cur.fetchall()]
+
+    def create_notification(self, ntype: str, title: str, body: str = "", lead_id: int = None) -> int:
+        with self.db_mgr.transaction() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO notifications (type, title, body, lead_id) VALUES (?, ?, ?, ?)",
+                (ntype, title, body, lead_id),
+            )
+            return cur.lastrowid
+
+    def get_notifications(self, unread_only: bool = False, limit: int = 50) -> list:
+        cur = self.conn.cursor()
+        if unread_only:
+            cur.execute("SELECT * FROM notifications WHERE is_read = 0 ORDER BY id DESC LIMIT ?", (limit,))
+        else:
+            cur.execute("SELECT * FROM notifications ORDER BY id DESC LIMIT ?", (limit,))
+        return [self._lead_row_to_dict(cur, r) for r in cur.fetchall()]
+
+    def mark_notification_read(self, notification_id: int):
+        with self.db_mgr.transaction() as conn:
+            conn.execute("UPDATE notifications SET is_read = 1 WHERE id = ?", (notification_id,))
 
     def close(self):
         self.db_mgr.close()

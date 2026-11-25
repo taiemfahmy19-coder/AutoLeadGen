@@ -53,22 +53,22 @@ class TestSearchMultilingualAndDedup(unittest.TestCase):
             self.assertEqual(res["region"], "MENA")
 
     def test_other_countries_language(self):
-        """Rule: Any country outside the Arab world strictly receives English (no German, French, Spanish, etc.)."""
-        # France -> English
+        """Rule: Supported European/Turkish markets receive their native language; others default to English."""
+        # France -> French
         fr = detect_country_and_language(phone="+33612345678", country_name="فرنسا")
-        self.assertEqual(fr["language"], "English")
+        self.assertEqual(fr["language"], "French")
 
-        # Germany -> English
+        # Germany -> German
         de = detect_country_and_language(phone="+491512345678", country_name="ألمانيا")
-        self.assertEqual(de["language"], "English")
+        self.assertEqual(de["language"], "German")
 
-        # Spain -> English
+        # Spain -> Spanish
         es = detect_country_and_language(phone="+34612345678", country_name="إسبانيا")
-        self.assertEqual(es["language"], "English")
+        self.assertEqual(es["language"], "Spanish")
 
-        # Turkey -> English
+        # Turkey -> Turkish
         tr = detect_country_and_language(phone="+905321234567", country_name="تركيا")
-        self.assertEqual(tr["language"], "English")
+        self.assertEqual(tr["language"], "Turkish")
 
         # UK -> English
         uk = detect_country_and_language(phone="+447911123456", country_name="المملكة المتحدة (UK)")

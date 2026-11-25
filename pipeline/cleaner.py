@@ -64,6 +64,9 @@ def normalize_phone(phone, default_country_code="20") -> str:
     if phone_str.startswith("+"):
         digits = re.sub(r"\D", "", phone_str)
         if len(digits) >= 7:
+            # Edge case: accidental '+' before local Egyptian mobile (+010/+011/+012/+015)
+            if digits.startswith(("010", "011", "012", "015")) and len(digits) == 11:
+                return f"+20{digits[1:]}"
             # Edge case: Egypt mobile with redundant 0 after country code (+20 010xxxx → 13 digits)
             if digits.startswith("2001") and len(digits) == 13 and digits[4] in "0125":
                 digits = "20" + digits[3:]

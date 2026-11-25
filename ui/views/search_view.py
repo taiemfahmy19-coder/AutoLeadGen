@@ -222,7 +222,49 @@ def render_search():
         last_country_info = st.session_state.get("last_search_country_info", {})
 
         map_markers = []
-        if last_results and last_country_info:
+        # Pull real GPS coords from DB leads when available
+        try:
+            db = st.session_state.get("db")
+            all_leads = db.get_all_leads() if db else []
+            for row in all_leads:
+                # row is a sqlite3.Row or tuple; try dict conversion
+                if hasattr(row, "keys"):
+                    d = dict(row)
+                else:
+                    # column positions: 0=id,1=name,5=industry,6=city,
+                    # V3: lat/lon are after index 23 — use safe get
+                    col_names = [
+                        "id", "business_name", "phone", "address", "website", "industry", "city",
+                        "source", "score", "status", "language", "created_at", "updated_at",
+                        "whatsapp_status", "phone_validity", "email", "email_status",
+                        "instagram_handle", "facebook_url",
+                        "first_contact_at", "last_contact_at", "next_follow_up_at", "notes", "priority",
+                        "latitude", "longitude", "coord_source", "coord_verified",
+                        "country", "continent", "collected_at", "source_url",
+                        "ai_summary", "ai_category", "unsubscribed", "last_reply_at",
+                        "reply_sentiment", "data_confidence",
+                    ]
+                    d = dict(zip(col_names, row))
+                lat = d.get("latitude")
+                lon = d.get("longitude")
+                if lat is not None and lon is not None:
+                    try:
+                        lat_f, lon_f = float(lat), float(lon)
+                        if -90 <= lat_f <= 90 and -180 <= lon_f <= 180:
+                            map_markers.append({
+                                "lat": lat_f,
+                                "lon": lon_f,
+                                "name": d.get("business_name", "نشاط تجاري"),
+                                "phone": d.get("phone", ""),
+                                "wa_status": d.get("whatsapp_status", "UNKNOWN"),
+                            })
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            pass
+
+        # Fallback: scatter last_results around city center (only if no GPS data)
+        if not map_markers and last_results and last_country_info:
             base_lat = last_country_info.get("lat", map_lat)
             base_lon = last_country_info.get("lon", map_lon)
             base_city_coords = last_country_info.get("city_coords", {})
@@ -234,14 +276,11 @@ def render_search():
             else:
                 m_lat, m_lon = base_lat, base_lon
 
-            import random
-            rng = random.Random(42)
             for item in last_results:
-                scatter_lat = m_lat + rng.uniform(-0.03, 0.03)
-                scatter_lon = m_lon + rng.uniform(-0.05, 0.05)
+                # Only place marker if we have no real GPS — do NOT use random scatter
                 map_markers.append({
-                    "lat": scatter_lat,
-                    "lon": scatter_lon,
+                    "lat": m_lat,
+                    "lon": m_lon,
                     "name": item.get("business_name") or item.get("اسم النشاط", "نشاط تجاري"),
                     "phone": item.get("phone") or item.get("الهاتف", ""),
                     "wa_status": item.get("whatsapp_status") or item.get("حالة WhatsApp", "UNKNOWN"),
