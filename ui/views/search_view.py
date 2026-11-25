@@ -322,24 +322,28 @@ def render_search():
             st.write("")
             st.write("")
             limit = st.number_input(
-                "العدد المطلوب (أقصى حد 50):",
+                "العدد المطلوب:",
                 min_value=1,
-                max_value=50,
+                max_value=200,
                 value=20,
-                help="الحد الأقصى الصارم هو 50 شخص مختلف تماماً. يضمن النظام استبعاد أي شخص ظهر في أي بحث سابق."
+                help="اختر عدد العملاء المستهدف استخراجهم بدقة وسرعة."
             )
-            # Enforce hard cap
-            limit = min(50, max(1, int(limit)))
+            limit = max(1, int(limit))
 
         # ── Section 3: WhatsApp Filter ────────────────────────────────────────
         st.divider()
         st.markdown(
             "<p style='font-size:0.82rem;font-weight:700;color:var(--ios-subtext);"
-            "text-transform:uppercase;margin-bottom:12px;'>3. إعدادات البحث المباشر عبر Google Maps</p>",
+            "text-transform:uppercase;margin-bottom:12px;'>3. إعدادات البحث المباشر فائق السرعة</p>",
             unsafe_allow_html=True
         )
 
-        st.info("🗺️ يعمل هذا النظام عبر **Google Maps الحي** فقط — يفتح كل بطاقة تجارية ويجلب الرقم الحقيقي المسجل فيها.")
+        st.markdown(
+            "<div style='background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.35);border-radius:12px;padding:10px 14px;color:#a5b4fc;font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px'>"
+            "<span>⚡</span><span>تم تفعيل <strong>محرك البحث التوربو فائق السرعة (Turbo Fast Mode)</strong>: استخراج فوري بدون إعادة تحميل الصفحات وبأعلى دقة للأرقام والمواقع الحقيقية GPS.</span>"
+            "</div>",
+            unsafe_allow_html=True
+        )
 
         # Always live, always Maps — only let user control WA filter
         use_live = True
@@ -503,6 +507,8 @@ def render_search():
                     whatsapp_status=item.get("whatsapp_status", "UNKNOWN"),
                     country=country_name,
                     language=target_lang,
+                    latitude=item.get("latitude"),
+                    longitude=item.get("longitude"),
                 )
 
                 # STRICT DEDUPLICATION: If merged into a previous record, exclude completely!

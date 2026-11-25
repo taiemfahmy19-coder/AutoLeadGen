@@ -175,15 +175,15 @@ class LeadScraper:
                         pass
 
                 # Dynamic continuous scrolling loop to accumulate enough business cards
-                # Needs roughly limit * 2.5 cards to guarantee target leads with mobile numbers
-                target_cards_count = min(150, max(25, int(limit * 2.5)))
+                # Fast optimized volume to return results in seconds rather than minutes
+                target_cards_count = min(60, max(15, int(limit * 1.6)))
                 feed = page.locator("div[role='feed']")
 
-                info(f"LeadScraper: Scrolling Google Maps feed to collect at least {target_cards_count} cards...")
+                info(f"LeadScraper: Fast scrolling Google Maps feed (target: {target_cards_count} cards)...")
 
                 prev_card_count = 0
                 no_growth_ticks = 0
-                max_scroll_attempts = 25
+                max_scroll_attempts = min(8, max(3, int(limit // 3) + 2))
 
                 for s_i in range(max_scroll_attempts):
                     # Find all visible card anchors
@@ -192,30 +192,27 @@ class LeadScraper:
                         current_cards = page.locator("div.Nv2PK, div[role='article']").count()
 
                     if current_cards >= target_cards_count:
-                        info(f"LeadScraper: Reached target card volume ({current_cards} cards) after {s_i+1} scrolls.")
+                        info(f"LeadScraper: Reached target card volume ({current_cards} cards) after {s_i+1} fast scrolls.")
                         break
 
                     if current_cards == prev_card_count:
                         no_growth_ticks += 1
-                        if no_growth_ticks >= 3:
-                            # Reached bottom of Google Maps results
-                            info(f"LeadScraper: Reached end of Google Maps feed ({current_cards} total cards).")
+                        if no_growth_ticks >= 2:
                             break
                     else:
                         no_growth_ticks = 0
 
                     prev_card_count = current_cards
 
-                    # Perform deep scroll in the feed container
                     try:
                         if feed.count() > 0:
-                            feed.first.evaluate("el => el.scrollTop += 2200")
+                            feed.first.evaluate("el => el.scrollTop += 2600")
                         else:
                             page.keyboard.press("PageDown")
                     except Exception:
                         page.keyboard.press("PageDown")
 
-                    page.wait_for_timeout(600)
+                    page.wait_for_timeout(200)
 
                 # Collect all unique card links
                 card_locators = page.locator("a.hfpxzc").all()
@@ -234,7 +231,16 @@ class LeadScraper:
                             if inner_h:
                                 name = inner_h[0].inner_text().strip()
                         if name and href and "google.com/maps/place" in href:
-                            places_to_visit.append({"name": name, "href": href})
+                            # Extract real GPS coordinates directly from href URL
+                            coord_m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", href)
+                            lat = float(coord_m.group(1)) if coord_m else None
+                            lon = float(coord_m.group(2)) if coord_m else None
+                            places_to_visit.append({
+                                "name": name,
+                                "href": href,
+                                "lat": lat,
+                                "lon": lon,
+                            })
                     except Exception:
                         continue
 
@@ -245,8 +251,20 @@ class LeadScraper:
                         break
 
                     try:
-                        page.goto(p_info["href"], timeout=18000)
-                        page.wait_for_timeout(400)
+                        # Fast in-place card click (150ms instead of 4000ms full page reload)
+                        card_clicked = False
+                        try:
+                            card_btn = page.locator(f"a.hfpxzc[aria-label='{p_info['name']}']").first
+                            if card_btn.count() > 0 and card_btn.is_visible():
+                                card_btn.click(timeout=1000)
+                                page.wait_for_timeout(200)
+                                card_clicked = True
+                        except Exception:
+                            pass
+
+                        if not card_clicked:
+                            page.goto(p_info["href"], timeout=6000)
+                            page.wait_for_timeout(200)
 
                         phone = ""
                         website = ""
@@ -322,6 +340,10 @@ class LeadScraper:
                             "country": country,
                             "source": "google_maps",
                             "whatsapp_status": wa_status,
+                            "latitude": p_info.get("lat"),
+                            "longitude": p_info.get("lon"),
+                            "coord_source": "maps_url" if p_info.get("lat") else "",
+                            "coord_verified": 1 if p_info.get("lat") else 0,
                         })
 
                     except Exception as item_err:

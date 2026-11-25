@@ -29,6 +29,8 @@ class LeadService:
         whatsapp_status: str = WA_STATUS_UNKNOWN,
         country: str = "",
         language: str = None,
+        latitude: float = None,
+        longitude: float = None,
     ) -> dict:
         """
         Clean, score, deduplicate, and persist a single lead record.
@@ -71,7 +73,14 @@ class LeadService:
             language=cleaned["language"],
         )
 
-        # 4. Auto-qualify if score threshold reached and has valid mobile
+        # 4. Save GPS coordinates if available
+        if not was_merged and latitude is not None and longitude is not None:
+            try:
+                self.db.update_lead_fields(lead_id, latitude=latitude, longitude=longitude, coord_source="maps_url", coord_verified=1)
+            except Exception:
+                pass
+
+        # 5. Auto-qualify if score threshold reached and has valid mobile
         if not was_merged and score >= SCORE_QUALIFIED_THRESHOLD and is_mobile_phone(cleaned["phone"]):
             self.db.update_lead_status(lead_id, STATUS_QUALIFIED)
 
