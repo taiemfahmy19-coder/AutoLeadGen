@@ -32,16 +32,8 @@ def render_outreach_queue():
         en_template = DEFAULT_ENGLISH_TEMPLATE
 
     def get_template_for_lead(lead_row):
-        # Index 5 is industry, index 10 is language in the leads schema
-        ind = (lead_row[5] or "").strip().lower() if len(lead_row) > 5 and lead_row[5] else ""
+        # Index 10 is language in the leads schema
         lang = lead_row[10] if len(lead_row) > 10 and lead_row[10] else "Arabic"
-
-        # Dedicated agency pitch for marketing & advertising companies
-        if any(k in ind for k in ["دعاية", "إعلان", "اعلان", "تصميم", "تسويق", "advertising", "agency", "marketing"]):
-            agency_tpl = next((t[3] for t in templates if t[0] == 6 or "شركات إعلانات" in t[1] or "دعاية" in t[1]), None)
-            if agency_tpl:
-                return agency_tpl
-
         if lang == "English":
             return en_template
         return MULTILINGUAL_TEMPLATES.get(lang, ar_template)
