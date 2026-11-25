@@ -356,3 +356,7 @@ class LeadScraper:
 
         info(f"LeadScraper: Finished scraping. Collected {len(collected)} authentic leads from Google Maps.")
         return collected
+
+
+# Alias for backward compatibility
+MapsScraper = LeadScraper

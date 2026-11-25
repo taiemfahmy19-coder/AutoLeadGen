@@ -8,7 +8,7 @@ from config.constants import (
     INTERACTION_SENT,
 )
 from database.repository import LeadRepository
-from integrations.maps_scraper import MapsScraper
+from integrations.maps_scraper import LeadScraper
 from pipeline.cleaner import DataCleaner
 from pipeline.scorer import calculate_ai_fit
 from services.outreach_service import OutreachService
@@ -109,7 +109,7 @@ def render_agency_hub():
             status_box.info(f"🔍 جاري البحث المباشر عن: **{query}**...")
 
             try:
-                scraper = MapsScraper()
+                scraper = LeadScraper()
                 raw_results = scraper.scrape_leads(
                     query=query,
                     limit=limit_count,
