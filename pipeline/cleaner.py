@@ -488,9 +488,3 @@ def clean_data(
         "country": country,
     }
 
-
-class DataCleaner:
-    @staticmethod
-    def clean_lead_data(**kwargs):
-        return clean_data(**kwargs)
-

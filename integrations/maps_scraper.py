@@ -87,16 +87,6 @@ class LeadScraper:
         info(f"LeadScraper: Returning {len(validated)} validated real leads from Google Maps.")
         return validated
 
-    def scrape_leads(self, *args, **kwargs):
-        """Backward-compatible alias for search_leads."""
-        if "query" in kwargs and "industry" not in kwargs:
-            kwargs["industry"] = kwargs.pop("query")
-        if "city" not in kwargs:
-            kwargs["city"] = ""
-        if "progress_callback" in kwargs and "progress_cb" not in kwargs:
-            kwargs["progress_cb"] = kwargs.pop("progress_callback")
-        return self.search_leads(*args, **kwargs)
-
     def _scrape_with_playwright(
         self,
         industry: str,
@@ -366,7 +356,3 @@ class LeadScraper:
 
         info(f"LeadScraper: Finished scraping. Collected {len(collected)} authentic leads from Google Maps.")
         return collected
-
-
-# Alias for backward compatibility
-MapsScraper = LeadScraper
