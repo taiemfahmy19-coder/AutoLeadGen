@@ -167,15 +167,37 @@ def render_settings():
         qr_target_url = f"http://{lan_ip}:8502/connect-email"
 
         if is_email_configured:
+            daily_lim = int(current_cfg.get("daily_limit", 500))
+            sent_today = email_engine.get_daily_sent_count()
             st.markdown(
                 f"""
                 <div style="background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.3);border-radius:12px;padding:14px 18px;margin-bottom:14px">
-                    <div style="color:#30d158;font-weight:700;font-size:16px">✅ البريد الإلكتروني مرتبط وجاهز للإرسال والاستقبال</div>
-                    <div style="color:#cbd5e1;font-size:13px;margin-top:4px">الحساب المرتبط: <strong>{current_cfg.get('sender_email')}</strong> ({current_cfg.get('provider')})</div>
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div>
+                            <div style="color:#30d158;font-weight:700;font-size:16px">✅ البريد الإلكتروني مرتبط وجاهز للإرسال والاستقبال</div>
+                            <div style="color:#cbd5e1;font-size:13px;margin-top:4px">الحساب المرتبط: <strong>{current_cfg.get('sender_email')}</strong> ({current_cfg.get('provider')})</div>
+                        </div>
+                        <span style="background:rgba(99,102,241,0.25);border:1px solid #6366f1;color:#a5b4fc;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:700">⭐ حساب Plus / Workspace</span>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
+
+            # Daily Quota Controller
+            q_col1, q_col2 = st.columns([3, 1])
+            with q_col1:
+                new_lim = st.slider(
+                    "🎯 الحد اليومي الآمن للإرسال (لحسابات Plus يصل إلى 2000 إيميل):",
+                    min_value=50, max_value=2000, value=daily_lim, step=50, key="slider_daily_lim"
+                )
+                if new_lim != daily_lim:
+                    current_cfg["daily_limit"] = new_lim
+                    email_engine.save_config(current_cfg)
+                    st.toast(f"تم تحديث الحد اليومي إلى {new_lim} إيميل/اليوم ✅")
+            with q_col2:
+                st.metric("تم إرساله اليوم", f"{sent_today} / {daily_lim}")
+
             col_t1, col_t2 = st.columns(2)
             with col_t1:
                 if st.button("⚡ فحص صلاحية الاتصال الآن", use_container_width=True, key="em_test_btn"):

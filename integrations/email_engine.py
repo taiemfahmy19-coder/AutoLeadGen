@@ -289,6 +289,23 @@ class EmailEngine:
         plain_text = f"أهلاً بإدارة {b_name}،\n\n{intro}\n\nالقيمة المضافة:\n{value_prop}\n\n{cta}\n\nمع خالص التقدير،\n{sender}"
         return subject, html, plain_text
 
+    def get_daily_sent_count(self) -> int:
+        """Count total emails successfully sent today from database interactions."""
+        today_prefix = time.strftime("%Y-%m-%d")
+        try:
+            from database.repository import LeadRepository
+            repo = LeadRepository()
+            cur = repo.conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM interactions WHERE channel = 'Email' AND status = 'SENT' AND date LIKE ?",
+                (f"{today_prefix}%",)
+            )
+            count = cur.fetchone()[0]
+            repo.close()
+            return int(count)
+        except Exception:
+            return 0
+
     def send_batch_emails(
         self,
         items: list[dict],
@@ -297,7 +314,7 @@ class EmailEngine:
         progress_callback = None
     ) -> dict:
         """
-        Send a batch of cold emails with realistic safety pauses between messages.
+        Send a batch of cold emails with realistic safety pauses and strict daily quota protection.
         """
         results = {"total": len(items), "sent": 0, "failed": 0, "details": []}
         cfg = self.load_config()
@@ -308,7 +325,24 @@ class EmailEngine:
             results["details"].append({"email": "all", "success": False, "error": err})
             return results
 
+        daily_limit = int(cfg.get("daily_limit", 100))
+        already_sent_today = self.get_daily_sent_count()
+        if already_sent_today >= daily_limit:
+            results["failed"] = len(items)
+            err_msg = f"تم الوصول إلى الحد الآمن اليومي ({daily_limit} إيميل/يومياً). تم الإيقاف لحماية حسابك من حظر Google."
+            results["details"].append({"email": "all", "success": False, "error": err_msg})
+            if progress_callback:
+                progress_callback(0, len(items), "جميع العملاء", False, err_msg)
+            return results
+
         for idx, item in enumerate(items):
+            # Check if current batch exceeds daily limit
+            if already_sent_today + results["sent"] >= daily_limit:
+                limit_msg = f"توقف مؤقت: تم بلوغ الحد اليومي الآمن ({daily_limit} إيميل/اليوم) لحماية الحساب."
+                if progress_callback:
+                    progress_callback(idx + 1, len(items), item.get("name", "عميل"), False, limit_msg)
+                break
+
             lead_id = item.get("id")
             email_addr = item.get("email", "").strip()
             name = item.get("name", "العميل")
@@ -328,6 +362,16 @@ class EmailEngine:
             if success:
                 results["sent"] += 1
                 results["details"].append({"id": lead_id, "name": name, "email": email_addr, "success": True, "error": None})
+                try:
+                    from database.repository import LeadRepository
+                    repo = LeadRepository()
+                    if lead_id:
+                        repo.insert_interaction(lead_id, channel="Email", message=subject, status="SENT", notes="Outreach campaign")
+                        repo.update_lead_fields(lead_id, status="CONTACTED", email_status="SENT")
+                    repo.close()
+                except Exception:
+                    pass
+
                 if progress_callback:
                     progress_callback(idx + 1, len(items), name, True, "تم الإرسال بنجاح ✅")
             else:
