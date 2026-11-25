@@ -311,11 +311,12 @@ def render_search():
                 horizontal=True
             )
             if ind_mode == "قائمة المجالات المقترحة":
-                industry = st.selectbox("المجال / النشاط التجاري:", INDUSTRY_PRESETS)
+                industry = st.selectbox("المجال / النشاط التجاري:", INDUSTRY_PRESETS, index=0, key="search_industry_preset")
             else:
                 industry = st.text_input(
                     "النشاط يدوياً:",
-                    placeholder="مثال: عطور ومستحضرات تجميل، كافيهات ومطاعم..."
+                    value="شركات دعاية وإعلان وتسويق",
+                    placeholder="مثال: شركات دعاية وإعلان، تسويق رقمي، كافيهات ومطاعم..."
                 )
 
         with niche_col2:
