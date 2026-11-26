@@ -134,13 +134,29 @@ def _build_leaflet_html(
 
 # ─── Main View ───────────────────────────────────────────────────────────────
 
-def render_search():
+def render_search(
+    is_agency_hub: bool = False,
+    custom_title: str = None,
+    custom_subtitle: str = None,
+    custom_icon: str = "🌍",
+    industry_presets: list = None,
+    default_ar_template: str = None,
+    key_prefix: str = "",
+):
     page_header(
-        title="استكشاف العملاء والتواصل عبر WhatsApp",
-        subtitle="بحث واستخراج عملاء جدد بدون أي تكرار مع التعرف التلقائي على الدولة ولغة الرسالة.",
-        icon="🌍",
-        badge="WhatsApp Dedicated Engine"
+        title=custom_title or "استكشاف العملاء والتواصل عبر WhatsApp",
+        subtitle=custom_subtitle or "بحث واستخراج عملاء جدد بدون أي تكرار مع التعرف التلقائي على الدولة ولغة الرسالة.",
+        icon=custom_icon,
+        badge="Agency & Hiring Hub" if is_agency_hub else "WhatsApp Dedicated Engine"
     )
+
+    res_key = f"{key_prefix}last_search_results"
+    ind_key = f"{key_prefix}last_search_industry"
+    city_key = f"{key_prefix}last_search_city"
+    city_name_key = f"{key_prefix}last_search_city_name"
+    country_info_key = f"{key_prefix}last_search_country_info"
+    show_leads_key = f"{key_prefix}show_extracted_leads"
+    success_msg_key = f"{key_prefix}search_success_msg"
 
     db = st.session_state.db
     messenger = st.session_state.messenger
@@ -218,8 +234,8 @@ def render_search():
             unsafe_allow_html=True
         )
 
-        last_results = st.session_state.get("last_search_results", [])
-        last_country_info = st.session_state.get("last_search_country_info", {})
+        last_results = st.session_state.get(res_key, [])
+        last_country_info = st.session_state.get(country_info_key, {})
 
         map_markers = []
         # Pull real GPS coords from DB leads when available
@@ -308,14 +324,17 @@ def render_search():
             ind_mode = st.radio(
                 "طريقة إدخال المجال:",
                 ["قائمة المجالات المقترحة", "إدخال يدوي مخصص"],
-                horizontal=True
+                horizontal=True,
+                key=f"{key_prefix}ind_mode"
             )
+            presets_to_use = industry_presets if industry_presets else INDUSTRY_PRESETS
             if ind_mode == "قائمة المجالات المقترحة":
-                industry = st.selectbox("المجال / النشاط التجاري:", INDUSTRY_PRESETS)
+                industry = st.selectbox("المجال / النشاط التجاري:", presets_to_use, key=f"{key_prefix}ind_select")
             else:
                 industry = st.text_input(
                     "النشاط يدوياً:",
-                    placeholder="مثال: عطور ومستحضرات تجميل، كافيهات ومطاعم..."
+                    placeholder="مثال: شركات دعاية وإعلان، تسويق رقمي..." if is_agency_hub else "مثال: عطور ومستحضرات تجميل، كافيهات ومطاعم...",
+                    key=f"{key_prefix}ind_manual"
                 )
 
         with niche_col2:
@@ -326,7 +345,8 @@ def render_search():
                 min_value=1,
                 max_value=200,
                 value=20,
-                help="اختر عدد العملاء المستهدف استخراجهم بدقة وسرعة."
+                help="اختر عدد العملاء المستهدف استخراجهم بدقة وسرعة.",
+                key=f"{key_prefix}limit"
             )
             limit = max(1, int(limit))
 
@@ -368,18 +388,19 @@ def render_search():
                 unsafe_allow_html=True
             )
             tpl_tabs = st.tabs(["🇸🇦 العربية", "🇺🇸 الإنجليزية", "🇫🇷 الفرنسية", "🇪🇸 الإسبانية", "🇩🇪 الألمانية", "🇹🇷 التركية"])
+            ar_template_val = default_ar_template if default_ar_template else MULTILINGUAL_TEMPLATES["Arabic"]
             with tpl_tabs[0]:
-                custom_ar = st.text_area("قالب الرسالة العربية:", value=MULTILINGUAL_TEMPLATES["Arabic"], height=85, key="tpl_input_Arabic")
+                custom_ar = st.text_area("قالب الرسالة العربية:", value=ar_template_val, height=120 if is_agency_hub else 85, key=f"{key_prefix}tpl_input_Arabic")
             with tpl_tabs[1]:
-                custom_en = st.text_area("قالب الرسالة الإنجليزية (للأمريكتين ودولي):", value=MULTILINGUAL_TEMPLATES["English"], height=85, key="tpl_input_English")
+                custom_en = st.text_area("قالب الرسالة الإنجليزية (للأمريكتين ودولي):", value=MULTILINGUAL_TEMPLATES["English"], height=85, key=f"{key_prefix}tpl_input_English")
             with tpl_tabs[2]:
-                custom_fr = st.text_area("قالب الرسالة الفرنسية:", value=MULTILINGUAL_TEMPLATES["French"], height=85, key="tpl_input_French")
+                custom_fr = st.text_area("قالب الرسالة الفرنسية:", value=MULTILINGUAL_TEMPLATES["French"], height=85, key=f"{key_prefix}tpl_input_French")
             with tpl_tabs[3]:
-                custom_es = st.text_area("قالب الرسالة الإسبانية:", value=MULTILINGUAL_TEMPLATES["Spanish"], height=85, key="tpl_input_Spanish")
+                custom_es = st.text_area("قالب الرسالة الإسبانية:", value=MULTILINGUAL_TEMPLATES["Spanish"], height=85, key=f"{key_prefix}tpl_input_Spanish")
             with tpl_tabs[4]:
-                custom_de = st.text_area("قالب الرسالة الألمانية:", value=MULTILINGUAL_TEMPLATES["German"], height=85, key="tpl_input_German")
+                custom_de = st.text_area("قالب الرسالة الألمانية:", value=MULTILINGUAL_TEMPLATES["German"], height=85, key=f"{key_prefix}tpl_input_German")
             with tpl_tabs[5]:
-                custom_tr = st.text_area("قالب الرسالة التركية:", value=MULTILINGUAL_TEMPLATES["Turkish"], height=85, key="tpl_input_Turkish")
+                custom_tr = st.text_area("قالب الرسالة التركية:", value=MULTILINGUAL_TEMPLATES["Turkish"], height=85, key=f"{key_prefix}tpl_input_Turkish")
 
             active_templates = {
                 "Arabic": custom_ar,
@@ -394,7 +415,8 @@ def render_search():
         if st.button(
             f"🚀 بدء استخراج حتى {limit} عميل جديد مختلف تماماً",
             type="primary",
-            use_container_width=True
+            use_container_width=True,
+            key=f"{key_prefix}btn_start_search"
         ):
             if not industry or not city or not country_name:
                 st.error("يرجى تحديد الدولة والمدينة والنشاط التجاري للمتابعة.")
@@ -554,17 +576,17 @@ def render_search():
                     break
 
             db.insert_search(f"{industry} ({country_name})", city, len(processed))
-            st.session_state["last_search_results"] = processed
-            st.session_state["last_search_industry"] = industry
-            st.session_state["last_search_city"] = f"{city}، {country_name}"
-            st.session_state["last_search_city_name"] = city
-            st.session_state["last_search_country_info"] = country_info
+            st.session_state[res_key] = processed
+            st.session_state[ind_key] = industry
+            st.session_state[city_key] = f"{city}، {country_name}"
+            st.session_state[city_name_key] = city
+            st.session_state[country_info_key] = country_info
 
             if processed:
-                st.session_state["show_extracted_leads"] = True
+                st.session_state[show_leads_key] = True
                 _prog_bar.empty()
                 _timer_box.empty()
-                st.session_state["search_success_msg"] = (
+                st.session_state[success_msg_key] = (
                     f"🎉 تم استخراج **{len(processed)}** شخص جديد ومختلف تماماً بنجاح! "
                     f"(تم استبعاد وتخطي {merged_count} مكرر من عمليات البحث السابقة). "
                     f"حد البحث: أقصى حد {limit} شخص."
@@ -578,13 +600,13 @@ def render_search():
     # ══════════════════════════════════════════════════════════════════════════
     # ── Section 4: WhatsApp Selection & Outreach Hub ─────────────────────────
     # ══════════════════════════════════════════════════════════════════════════
-    if st.session_state.get("search_success_msg"):
-        st.success(st.session_state.pop("search_success_msg"))
+    if st.session_state.get(success_msg_key):
+        st.success(st.session_state.pop(success_msg_key))
 
-    last_res = st.session_state.get("last_search_results", [])
+    last_res = st.session_state.get(res_key, [])
     
-    # If no results in session, try to load latest leads from database as fallback
-    if not last_res:
+    # If no results in session, try to load latest leads from database as fallback (only for general search)
+    if not last_res and not is_agency_hub:
         recent_db_leads = db.get_all_leads()
         if recent_db_leads:
             # Take last 50 leads
@@ -632,23 +654,23 @@ def render_search():
                     "اللغة": lang,
                 })
             last_res = recovered
-            st.session_state["last_search_results"] = recovered
+            st.session_state[res_key] = recovered
 
     if last_res:
         st.divider()
         # Toggle / Show button for results
-        show_leads = st.session_state.get("show_extracted_leads", True)
+        show_leads = st.session_state.get(show_leads_key, True)
         
         btn_col1, btn_col2 = st.columns([3, 1])
         with btn_col1:
             btn_label = f"👥 إخفاء العملاء المستخرجين ({len(last_res)})" if show_leads else f"👥 إظهار العملاء المستخرجين ({len(last_res)} عميل)"
-            if st.button(btn_label, type="primary" if not show_leads else "secondary", use_container_width=True, key="btn_toggle_show_leads"):
-                st.session_state["show_extracted_leads"] = not show_leads
+            if st.button(btn_label, type="primary" if not show_leads else "secondary", use_container_width=True, key=f"{key_prefix}btn_toggle_show_leads"):
+                st.session_state[show_leads_key] = not show_leads
                 st.rerun()
         with btn_col2:
             st.caption(f"إجمالي المتاح: {len(last_res)} عميل")
 
-    if last_res and st.session_state.get("show_extracted_leads", True):
+    if last_res and st.session_state.get(show_leads_key, True):
         st.divider()
         section_label(f"📲 نتائج البحث والتواصل المباشر عبر WhatsApp ({len(last_res)} شخص مختلف)")
 
@@ -676,21 +698,21 @@ def render_search():
         # ── Bulk selection controls ──────────────────────────────────────────
         sel_col1, sel_col2, sel_col3 = st.columns([1.5, 2, 2])
         with sel_col1:
-            select_all = st.checkbox("تحديد الكل", value=True, key="select_all_leads")
+            select_all = st.checkbox("تحديد الكل", value=True, key=f"{key_prefix}select_all_leads")
 
         selected_leads = []
         for idx, item in enumerate(last_res):
             default_val = select_all
-            lead_chk_key = f"chk_lead_{item['id']}_{idx}"
+            lead_chk_key = f"{key_prefix}chk_lead_{item['id']}_{idx}"
             if lead_chk_key not in st.session_state:
                 st.session_state[lead_chk_key] = default_val
-            elif select_all != st.session_state.get("_prev_select_all", True):
+            elif select_all != st.session_state.get(f"{key_prefix}_prev_select_all", True):
                 st.session_state[lead_chk_key] = select_all
 
-        st.session_state["_prev_select_all"] = select_all
+        st.session_state[f"{key_prefix}_prev_select_all"] = select_all
 
         with sel_col2:
-            current_selected = [item for idx, item in enumerate(last_res) if st.session_state.get(f"chk_lead_{item['id']}_{idx}", True)]
+            current_selected = [item for idx, item in enumerate(last_res) if st.session_state.get(f"{key_prefix}chk_lead_{item['id']}_{idx}", True)]
             st.markdown(f"<p style='font-size:13px;padding-top:6px;color:#30d158;font-weight:600;'>المحدد للتواصل: {len(current_selected)} من {len(last_res)}</p>", unsafe_allow_html=True)
 
         with sel_col3:
@@ -703,7 +725,7 @@ def render_search():
         if current_selected and wa_connected:
             with st.expander(f"🚀 إرسال WhatsApp آلي بالمتصفح للعملاء المحددين ({len(current_selected)} عميل)", expanded=False):
                 st.write("سيقوم النظام بإرسال الرسائل المخصصة عبر WhatsApp Web مع فواصل زمنية بشرية لحماية الحساب.")
-                if st.button("بدء الإرسال الآلي الآن", type="primary", key="btn_bulk_wa"):
+                if st.button("بدء الإرسال الآلي الآن", type="primary", key=f"{key_prefix}btn_bulk_wa"):
                     prog_bar = st.progress(0, text="جاري بدء الإرسال...")
                     sent_ok = 0
                     sent_fail = 0
@@ -744,7 +766,7 @@ def render_search():
                     st.write("")
                     st.checkbox(
                         "",
-                        key=f"chk_lead_{lid}_{idx}",
+                        key=f"{key_prefix}chk_lead_{lid}_{idx}",
                         label_visibility="collapsed"
                     )
 
@@ -766,7 +788,7 @@ def render_search():
                         "نص الرسالة المجهزة:",
                         value=msg,
                         height=90,
-                        key=f"msg_area_{lid}_{idx}",
+                        key=f"{key_prefix}msg_area_{lid}_{idx}",
                         label_visibility="collapsed"
                     )
 
@@ -786,7 +808,7 @@ def render_search():
 
                     # 2. Automated Send via Playwright
                     if wa_connected:
-                        if st.button("🤖 إرسال آلي", key=f"auto_btn_{lid}_{idx}", use_container_width=True):
+                        if st.button("🤖 إرسال آلي", key=f"{key_prefix}auto_btn_{lid}_{idx}", use_container_width=True):
                             with st.spinner("جاري الإرسال عبر المتصفح..."):
                                 ok, detail = messenger.send_via_playwright(
                                     lead_id=lid,
@@ -801,7 +823,7 @@ def render_search():
                                 st.error(detail)
 
                     # 3. Mark contacted button
-                    if st.button("✅ تم التواصل", key=f"mark_c_{lid}_{idx}", use_container_width=True):
+                    if st.button("✅ تم التواصل", key=f"{key_prefix}mark_c_{lid}_{idx}", use_container_width=True):
                         db.update_lead_status(lid, STATUS_CONTACTED)
                         st.success("تم تحديث الحالة إلى CONTACTED.")
                         st.rerun()
